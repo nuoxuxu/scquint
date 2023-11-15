@@ -61,8 +61,10 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
     gtf = gtf[gtf.feature == "exon"]
     gtf["gene_id"] = gtf.attribute.str.extract(r'gene_id "([^;]*)";')
     gtf["gene_name"] = gtf.attribute.str.extract(r'gene_name "([^;]*)";')
-    gtf.chromosome = "chr" + gtf.chromosome.astype(str)
-
+    if np.array([x.startswith("chr") for x in adata.var.chromosome.unique()]).sum() != 0:
+        gtf.chromosome = "chr" + gtf.chromosome.astype(str)
+    else:
+        pass
     gene_id_name = gtf[["gene_id", "gene_name"]].drop_duplicates()
 
     exon_starts = (
