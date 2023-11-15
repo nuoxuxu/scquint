@@ -215,7 +215,11 @@ def group_normalize(X, groups, smooth=False):
 
 
 def calculate_PSI(adata, smooth=False):
-    return group_normalize(adata.X.toarray(), adata.var.intron_group.values, smooth=smooth)
+    if isinstance(adata.X, np.ndarray):
+        out = group_normalize(adata.X, adata.var.intron_group.values, smooth=smooth)
+    else:
+        out = group_normalize(adata.X.toarray(), adata.var.intron_group.values, smooth=smooth)
+    return out
 
 
 def filter_min_cells_per_feature(adata, min_cells_per_feature, idx_cells_to_count=slice(None)):
