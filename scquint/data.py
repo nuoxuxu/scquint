@@ -218,7 +218,10 @@ def calculate_PSI(adata, smooth=False):
 
 def filter_min_cells_per_feature(adata, min_cells_per_feature, idx_cells_to_count=slice(None)):
     print("filter_min_cells_per_feature")
-    idx_features = np.where((adata.X[idx_cells_to_count] > 0).sum(axis=0).A1 >= min_cells_per_feature)[0]
+    if isinstance(adata.X, np.ndarray):
+        idx_features = np.where((adata.X[idx_cells_to_count] > 0).sum(axis=0) >= min_cells_per_feature)[0]
+    else:
+        idx_features = np.where((adata.X[idx_cells_to_count] > 0).sum(axis=0).A1 >= min_cells_per_feature)[0]
     adata = adata[:, idx_features]
     adata = filter_singletons(adata)
     return adata
@@ -228,7 +231,10 @@ def filter_min_cells_per_intron_group(adata, min_cells_per_intron_group, idx_cel
     print("filter_min_cells_per_intron_group")
     intron_groups = relabel(adata.var.intron_group.values)
     intron_group_summation = make_intron_group_summation_cpu(intron_groups)
-    n_cells_per_intron_group = ((((adata.X[idx_cells_to_count]) @ intron_group_summation) > 0).sum(axis=0)).A1
+    if isinstance(adata.X, np.ndarray):
+        n_cells_per_intron_group = ((((adata.X[idx_cells_to_count]) @ intron_group_summation) > 0).sum(axis=0))
+    else:
+        n_cells_per_intron_group = ((((adata.X[idx_cells_to_count]) @ intron_group_summation) > 0).sum(axis=0)).A1
     idx_intron_groups = np.where(n_cells_per_intron_group >= min_cells_per_intron_group)[0]
     idx_features = np.where(np.isin(intron_groups, idx_intron_groups))[0]
     adata = adata[:, idx_features]
@@ -249,7 +255,10 @@ def filter_min_global_proportion(adata, min_global_proportion, idx_cells_to_coun
     print("filter_min_global_proportion")
     intron_groups = relabel(adata.var.intron_group.values)
     intron_group_summation = make_intron_group_summation_cpu(intron_groups)
-    feature_counts = adata.X[idx_cells_to_count].sum(axis=0).A1
+    if isinstance(adata.X, np.ndarray):
+        feature_counts = adata.X[idx_cells_to_count].sum(axis=0)
+    else:
+        feature_counts = adata.X[idx_cells_to_count].sum(axis=0).A1
     intron_group_counts = (feature_counts @ intron_group_summation)
     feature_proportions = feature_counts / intron_group_counts[intron_groups]
     adata = adata[:, feature_proportions >= min_global_proportion]
