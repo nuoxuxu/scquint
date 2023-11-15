@@ -193,7 +193,10 @@ def _run_differential_splicing(
         print(adata.shape)
     if min_cells_per_intron_group is not None:
         adata = filter_min_cells_per_intron_group(adata, min_cells_per_intron_group, cell_idx_a)
-        adata = filter_min_cells_per_intron_group(adata, min_cells_per_intron_group, cell_idx_b)
+        if adata.shape[1] == 0:
+            pass
+        else:
+            adata = filter_min_cells_per_intron_group(adata, min_cells_per_intron_group, cell_idx_b)
         print(adata.shape)
     if adata.shape[1] == 0: return pd.DataFrame(), pd.DataFrame()
 
