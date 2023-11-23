@@ -61,6 +61,7 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
     gtf = gtf[gtf.feature == "exon"]
     gtf["gene_id"] = gtf.attribute.str.extract(r'gene_id "([^;]*)";')
     gtf["gene_name"] = gtf.attribute.str.extract(r'gene_name "([^;]*)";')
+    gtf["canonical"] = gtf["attribute"].str.findall("Ensembl_canonical").apply(lambda x: len(x) > 0)
     if np.array([x.startswith("chr") for x in adata.var.chromosome.unique()]).sum() != 0:
         gtf.chromosome = "chr" + gtf.chromosome.astype(str)
     else:
@@ -68,11 +69,11 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
     gene_id_name = gtf[["gene_id", "gene_name"]].drop_duplicates()
 
     exon_starts = (
-        gtf[["chromosome", "start", "gene_id"]].copy().rename(columns={"start": "pos"})
+        gtf[["chromosome", "start", "gene_id", "canonical"]].copy().rename(columns={"start": "pos", "canonical": "canonical_start"})
     )
     exon_starts.pos -= 1
     exon_ends = (
-        gtf[["chromosome", "end", "gene_id"]].copy().rename(columns={"end": "pos"})
+        gtf[["chromosome", "end", "gene_id", "canonical"]].copy().rename(columns={"end": "pos", "canonical": "canonical_end"})
     )
     exon_ends.pos += 1
     exon_boundaries = pd.concat(
@@ -81,11 +82,11 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
 
     genes_by_exon_boundary = exon_boundaries.groupby(
         ["chromosome", "pos"]
-    ).gene_id.unique()
+    ).agg({"gene_id": lambda x: x.unique(), "canonical_start": "any", "canonical_end": "any"})
 
     adata.var = (
         adata.var.merge(
-            genes_by_exon_boundary,
+            genes_by_exon_boundary.drop(columns = ["canonical_end"]),
             how="left",
             left_on=["chromosome", "start"],
             right_on=["chromosome", "pos"],
@@ -95,7 +96,7 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
     )
     adata.var = (
         adata.var.merge(
-            genes_by_exon_boundary,
+            genes_by_exon_boundary.drop(columns = ["canonical_start"]),
             how="left",
             left_on=["chromosome", "end"],
             right_on=["chromosome", "pos"],
