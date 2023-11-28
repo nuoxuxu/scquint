@@ -108,10 +108,12 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
 
     def fill_na_with_empty_array(val):
         return val if isinstance(val, np.ndarray) else np.array([])
-
+    def fill_na_with_empty_string(val):
+        return val if not np.isnan(val) else ""    
     adata.var.gene_id_start = adata.var.gene_id_start.apply(fill_na_with_empty_array)
     adata.var.gene_id_end = adata.var.gene_id_end.apply(fill_na_with_empty_array)
-
+    adata.var.canonical_start = adata.var.canonical_start.apply(fill_na_with_empty_string)
+    adata.var.canonical_end = adata.var.canonical_end.apply(fill_na_with_empty_string)
     adata.var["gene_id_list"] = adata.var.apply(
         lambda row: np.unique(np.concatenate([row.gene_id_start, row.gene_id_end])),
         axis=1,
