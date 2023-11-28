@@ -41,6 +41,7 @@ def load_adata_from_starsolo(
 
 
 def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
+    adata_out = adata.copy()
     gtf = pd.read_csv(
         gtf_path,
         sep="\t",
@@ -59,87 +60,86 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
         ],
         dtype={'chromosome': str}
     )
+
     gtf = gtf[gtf.feature == "exon"]
     gtf["gene_id"] = gtf.attribute.str.extract(r'gene_id "([^;]*)";')
     gtf["gene_name"] = gtf.attribute.str.extract(r'gene_name "([^;]*)";')
     gtf["canonical"] = gtf["attribute"].str.findall("Ensembl_canonical").apply(lambda x: len(x) > 0)
-    if np.array([x.startswith("chr") for x in adata.var.chromosome.unique()]).sum() != 0:
+
+    if np.array([x.startswith("chr") for x in adata_out.var.chromosome.unique()]).sum() != 0:
         gtf.chromosome = "chr" + gtf.chromosome.astype(str)
     else:
         pass
     gene_id_name = gtf[["gene_id", "gene_name"]].drop_duplicates()
 
     exon_starts = (
-        gtf[["chromosome", "start", "gene_id", "canonical"]].copy().rename(columns={"start": "pos", "canonical": "canonical_start"})
+        gtf[["chromosome", "start", "gene_id", "canonical"]].copy().rename(columns={"start": "pos"})
     )
     exon_starts.pos -= 1
     exon_ends = (
-        gtf[["chromosome", "end", "gene_id", "canonical"]].copy().rename(columns={"end": "pos", "canonical": "canonical_end"})
+        gtf[["chromosome", "end", "gene_id", "canonical"]].copy().rename(columns={"end": "pos"})
     )
     exon_ends.pos += 1
     exon_boundaries = pd.concat(
         [exon_starts, exon_ends], ignore_index=True
-    ).drop_duplicates()
+    )
+    genes_by_exon_boundary = exon_boundaries.groupby(["chromosome", "pos"])\
+        .agg({"canonical": "any", "gene_id": lambda x: x.unique()})
 
-    genes_by_exon_boundary = exon_boundaries.groupby(
-        ["chromosome", "pos"]
-    ).agg({"gene_id": lambda x: x.unique(), "canonical_start": "any", "canonical_end": "any"})
-
-    adata.var = (
-        adata.var.merge(
-            genes_by_exon_boundary.drop(columns = ["canonical_end"]),
+    adata_out.var = (
+        adata_out.var.merge(
+            genes_by_exon_boundary,
             how="left",
             left_on=["chromosome", "start"],
             right_on=["chromosome", "pos"],
         )
-        .rename(columns={"gene_id": "gene_id_start"})
-        .set_index(adata.var.index)
+        .rename(columns={"gene_id": "gene_id_start", "canonical": "canonical_start"})
+        .set_index(adata_out.var.index)
     )
-    adata.var = (
-        adata.var.merge(
-            genes_by_exon_boundary.drop(columns = ["canonical_start"]),
+    adata_out.var = (
+        adata_out.var.merge(
+            genes_by_exon_boundary,
             how="left",
             left_on=["chromosome", "end"],
             right_on=["chromosome", "pos"],
         )
-        .rename(columns={"gene_id": "gene_id_end"})
-        .set_index(adata.var.index)
+        .rename(columns={"gene_id": "gene_id_end", "canonical": "canonical_end"})
+        .set_index(adata_out.var.index)
     )
 
     def fill_na_with_empty_array(val):
         return val if isinstance(val, np.ndarray) else np.array([])
     def fill_na_with_empty_string(val):
         return val if not np.isnan(val) else ""    
-    adata.var.gene_id_start = adata.var.gene_id_start.apply(fill_na_with_empty_array)
-    adata.var.gene_id_end = adata.var.gene_id_end.apply(fill_na_with_empty_array)
-    adata.var.canonical_start = adata.var.canonical_start.apply(fill_na_with_empty_string)
-    adata.var.canonical_end = adata.var.canonical_end.apply(fill_na_with_empty_string)
-    adata.var["gene_id_list"] = adata.var.apply(
+    adata_out.var.gene_id_start = adata_out.var.gene_id_start.apply(fill_na_with_empty_array)
+    adata_out.var.gene_id_end = adata_out.var.gene_id_end.apply(fill_na_with_empty_array)
+    adata_out.var.canonical_start = adata_out.var.canonical_start.apply(fill_na_with_empty_string)
+    adata_out.var.canonical_end = adata_out.var.canonical_end.apply(fill_na_with_empty_string)
+    adata_out.var["gene_id_list"] = adata_out.var.apply(
         lambda row: np.unique(np.concatenate([row.gene_id_start, row.gene_id_end])),
         axis=1,
     )
-    adata.var["n_genes"] = adata.var.gene_id_list.apply(len)
-    adata.var.gene_id_list = adata.var.gene_id_list.apply(
+    adata_out.var["n_genes"] = adata_out.var.gene_id_list.apply(len)
+    adata_out.var.gene_id_list = adata_out.var.gene_id_list.apply(
         lambda x: ",".join(x.tolist())
     )
-    adata.var.gene_id_start = adata.var.gene_id_start.apply(
+    adata_out.var.gene_id_start = adata_out.var.gene_id_start.apply(
         lambda x: ",".join(x.tolist())
     )
-    adata.var.gene_id_end = adata.var.gene_id_end.apply(
+    adata_out.var.gene_id_end = adata_out.var.gene_id_end.apply(
         lambda x: ",".join(x.tolist())
     )
 
     if filter_unique_gene:
         print("Filtering to introns associated to 1 and only 1 gene.")
-        adata = adata[:, adata.var.n_genes == 1]
-        adata.var["gene_id"] = adata.var.gene_id_list
-        adata.var.drop(columns=["gene_id_list",], inplace=True)
-        adata.var = adata.var.merge(gene_id_name, how="left", on="gene_id").set_index(
-            adata.var.index
+        adata_out = adata_out[:, adata_out.var.n_genes == 1]
+        adata_out.var["gene_id"] = adata_out.var.gene_id_list
+        adata_out.var.drop(columns=["gene_id_list",], inplace=True)
+        adata_out.var = adata_out.var.merge(gene_id_name, how="left", on="gene_id").set_index(
+            adata_out.var.index
         )
-        adata.var.index = adata.var.gene_name.astype(str) + "_" + adata.var.index.astype(str)
-
-    return adata
+        adata_out.var.index = adata_out.var.gene_name.astype(str) + "_" + adata_out.var.index.astype(str)
+    return adata_out
 
 
 def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
