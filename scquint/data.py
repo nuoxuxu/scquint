@@ -57,6 +57,7 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
             "frame",
             "attribute",
         ],
+        dtype={'chromosome': str}
     )
     gtf = gtf[gtf.feature == "exon"]
     gtf["gene_id"] = gtf.attribute.str.extract(r'gene_id "([^;]*)";')
