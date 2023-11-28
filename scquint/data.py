@@ -141,8 +141,9 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
 
 
 def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
+    adata_out = adata.copy()
     if by == "three_prime":
-        adata.var["intron_group"] = adata.var.apply(
+        adata_out.var["intron_group"] = adata_out.var.apply(
             lambda intron: intron.chromosome
             + "_"
             + (str(intron.end) if intron.strand == "+" else str(intron.start))
@@ -151,7 +152,7 @@ def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
             axis=1,
         )
     elif by == "five_prime":
-        adata.var["intron_group"] = adata.var.apply(
+        adata_out.var["intron_group"] = adata_out.var.apply(
             lambda intron: intron.chromosome
             + "_"
             + (str(intron.end) if intron.strand == "-" else str(intron.start))
@@ -160,30 +161,30 @@ def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
             axis=1,
         )
     elif by == "gene":
-        adata.var["intron_group"] = adata.var.gene_id
+        adata_out.var["intron_group"] = adata_out.var.gene_id
     else:
         raise Exception(f"Grouping by {by} not yet supported.")
 
     intron_group_sizes = (
-        adata.var.intron_group.value_counts()
+        adata_out.var.intron_group.value_counts()
         .rename("intron_group_size")
         .to_frame()
     )
-    adata.var = adata.var.merge(
+    adata_out.var = adata_out.var.merge(
         intron_group_sizes, how="left", left_on="intron_group", right_index=True
-    ).set_index(adata.var.index)
+    ).set_index(adata_out.var.index)
     print("Filtering singletons.")
-    adata = adata[:, adata.var.intron_group_size > 1]
+    adata_out = adata_out[:, adata_out.var.intron_group_size > 1]
 
 
     if filter_unique_gene_per_group:
         print("Filtering intron groups associated with more than 1 gene.")
-        n_genes_per_intron_group = adata.var.groupby("intron_group").gene_id.nunique().to_frame().rename(columns={"gene_id": "n_genes_per_intron_group"})
-        adata.var = adata.var.merge(n_genes_per_intron_group, how="left", left_on="intron_group", right_index=True)
-        adata = adata[:, adata.var.n_genes_per_intron_group==1]
-        adata.var.intron_group = adata.var.gene_name.astype(str) + "_" + adata.var.intron_group.astype(str)
+        n_genes_per_intron_group = adata_out.var.groupby("intron_group").gene_id.nunique().to_frame().rename(columns={"gene_id": "n_genes_per_intron_group"})
+        adata_out.var = adata_out.var.merge(n_genes_per_intron_group, how="left", left_on="intron_group", right_index=True)
+        adata_out = adata_out[:, adata_out.var.n_genes_per_intron_group==1]
+        adata_out.var.intron_group = adata_out.var.gene_name.astype(str) + "_" + adata_out.var.intron_group.astype(str)
 
-    return adata
+    return adata_out
 
 
 def make_intron_group_summation_cpu(intron_groups):
