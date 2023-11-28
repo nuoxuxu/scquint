@@ -41,6 +41,7 @@ def load_adata_from_starsolo(
 
 
 def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
+    assert gtf_path.endswith("110.gtf")
     adata_out = adata.copy()
     gtf = pd.read_csv(
         gtf_path,
