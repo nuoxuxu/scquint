@@ -1,16 +1,13 @@
-from collections import Counter, defaultdict
-import networkx as nx
 import numpy as np
-import os
 import pandas as pd
-import scanpy as sc
-import scipy.sparse as sp_sparse
 
 
 def load_adata_from_starsolo(
     input_dir,
     var_filename="features.tsv",  # other values: SJ.out.tab
 ):
+    import scanpy as sc
+    import os
     adata = sc.read_mtx(os.path.join(input_dir, "matrix.mtx")).T
     obs = pd.read_csv(os.path.join(input_dir, "barcodes.tsv"), header=None).set_index(0)
     obs.index.name = None
@@ -31,7 +28,7 @@ def load_adata_from_starsolo(
         ],
     )
     var.strand.replace({0: "NA", 1: "+", 2: "-"}, inplace=True)
-    var.index = var.chromosome + ":" + var.start.astype(str) + "-" + var.end.astype(str)
+    var.index = var.chromosome.astype(str) + ":" + var.start.astype(str) + "-" + var.end.astype(str)
 
     adata.obs = obs
     adata.var = var
@@ -41,7 +38,9 @@ def load_adata_from_starsolo(
 
 
 def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
-    assert gtf_path.endswith("110.gtf")
+    import warnings
+    if not gtf_path.endswith("110.gtf"):
+        warnings.warn("The file path does not end with '110.gtf'", UserWarning)
     adata_out = adata.copy()
     gtf = pd.read_csv(
         gtf_path,
@@ -191,6 +190,7 @@ def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
 
 
 def make_intron_group_summation_cpu(intron_groups):
+    import scipy.sparse as sp_sparse
     intron_groups = relabel(intron_groups)
     n_introns = len(intron_groups)
     n_intron_groups = len(np.unique(intron_groups))
@@ -210,12 +210,32 @@ def relabel(labels):
 
 
 def group_normalize(X, groups, smooth=False):
+    '''
+    group normalize X by groups
+
+    Args:
+        X: np.ndarray
+            ttype x absolute intron count matrix
+        groups: np.ndarray
+            intron group labels
+        smooth: bool
+            whether to smooth the group normalization
+    
+    Returns:
+        PSI: np.ndarray
+            ttype x PSI matrix
+
+    '''
+    assert type(X) == np.ndarray, "X must be a numpy array."
+    assert type(groups) == np.ndarray, "groups must be a numpy array."
+    assert X.shape[1] == len(groups), "X must have the same number of columns as the length of groups."
     groups = relabel(groups)
     intron_group_summation = make_intron_group_summation_cpu(groups)
     if smooth:
         intron_sum = X.sum(axis=0)
         intron_group_sum = intron_sum @ intron_group_summation
-        X = X + intron_sum / intron_group_sum[groups]
+        with np.errstate(divide='ignore'):
+            X = X + intron_sum / intron_group_sum[groups]
     intron_group_sums = X @ intron_group_summation
     return X / intron_group_sums[:,groups]
 
@@ -227,6 +247,10 @@ def calculate_PSI(adata, smooth=False):
         out = group_normalize(adata.X.toarray(), adata.var.intron_group.values, smooth=smooth)
     return out
 
+def filter_min_global_SJ_counts(adata, min_SJ_counts):
+    idx_features = np.flatnonzero(adata.X.sum(axis=0) >= min_SJ_counts)
+    # print(f"{(len(idx_features)/adata.X.shape[1]) * 100}% of introns passed the filter")
+    return adata[:, idx_features]
 
 def filter_min_cells_per_feature(adata, min_cells_per_feature, idx_cells_to_count=slice(None)):
     print("filter_min_cells_per_feature")
@@ -255,6 +279,7 @@ def filter_min_cells_per_intron_group(adata, min_cells_per_intron_group, idx_cel
 
 
 def filter_singletons(adata):
+    from collections import Counter
     print("filter_singletons")
     intron_group_counter = Counter(adata.var.intron_group.values)
     intron_group_counts = np.array([intron_group_counter[c] for c in adata.var.intron_group.values])
@@ -279,6 +304,8 @@ def filter_min_global_proportion(adata, min_global_proportion, idx_cells_to_coun
 
 
 def regroup(adata):
+    from collections import defaultdict
+    import networkx as nx
     print("regroup")
     A = adata.var.start.values
     B = adata.var.end.values
@@ -315,3 +342,6 @@ def regroup(adata):
     adata = adata[:, mask]
 
     return adata
+
+def yes():
+    print("yes")

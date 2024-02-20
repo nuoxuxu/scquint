@@ -144,7 +144,7 @@ def run_regression(args):
     init_A = np.zeros((2, n_classes - 1), dtype=float)
     init_A[0] = alr(y[cell_mask_a].sum(axis=0) + pseudocounts, denominator_idx=-1)
     init_A[1] = alr(y[cell_mask_b].sum(axis=0) + pseudocounts, denominator_idx=-1) - init_A[0]
-    model = lambda: DirichletMultinomialGLM(2, n_classes, init_A=init_A)
+    model = lambda: DirichletMultinomialGLM(n_covariates, n_classes, init_A=init_A)
     ll, model = fit_model(model, x, y)
     if ll+1e-2 < ll_null:
         raise Exception(f"WARNING: optimization failed for intron_group {intron_group}. ll_null={ll_null} ll_full={ll}")
