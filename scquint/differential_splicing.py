@@ -5,15 +5,12 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from joblib import Parallel, delayed
-from pyro.distributions import Dirichlet, DirichletMultinomial, Gamma, Multinomial
+from pyro.distributions import DirichletMultinomial, Gamma, Multinomial
 import scanpy as sc
 from scipy.special import softmax
 from scipy.stats import chi2, mannwhitneyu
 from sklearn.model_selection import KFold, train_test_split, StratifiedKFold
-from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
-
 from .data import make_intron_group_summation_cpu, filter_min_cells_per_feature, filter_min_cells_per_intron_group, regroup, filter_min_global_proportion
 
 
@@ -124,16 +121,54 @@ def normalize(x):
     return x / sum(x)
 
 
-def run_regression(args):
-    intron_group, y, cell_idx_a, cell_idx_b = args
+def run_regression(ttype_by_intron, ttype_by_ephys, features_subset, intron_group, device="cpu"):
+    introns_to_use = features_subset.loc[features_subset.intron_group == intron_group].index.astype(int)
+    y = ttype_by_intron[:, introns_to_use].toarray()
+    x = ttype_by_ephys
+
     cells_to_use = np.where(y.sum(axis=1) > 0)[0]
     y = y[cells_to_use]
+    x = x[cells_to_use]
     n_cells, n_classes = y.shape
     n_covariates = 2
-    cell_mask_a = np.isin(cells_to_use, cell_idx_a)
-    cell_mask_b = np.isin(cells_to_use, cell_idx_b)
-    x = np.ones((n_cells, 2), dtype=float)
-    x[cell_mask_a, 1] = 0
+    x = np.column_stack([np.ones(n_cells), x])
+    x_null = np.expand_dims(x[:, 0], axis=1)
+
+    pseudocounts = 10.0
+    init_A_null = np.expand_dims(alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), axis=0)
+    model_null = lambda: DirichletMultinomialGLM(1, n_classes, init_A=init_A_null)
+
+    ll_null, model_null = fit_model(model_null, x_null, y, device)
+    init_A = np.zeros((n_covariates, n_classes - 1), dtype=float)
+    model = lambda: DirichletMultinomialGLM(n_covariates, n_classes, init_A=init_A)
+    ll, model = fit_model(model, x, y, device)
+    if ll+1e-2 < ll_null:
+        return pd.DataFrame(dict(intron_group=[intron_group], p_value=[None], ll_null=[None], ll=[None], n_classes=[n_classes])), pd.DataFrame()
+    p_value = lrtest(ll_null, ll, n_classes - 1)
+    A = model.get_full_A().cpu().detach().numpy()
+    log_alpha = model.log_alpha.cpu().detach().numpy()
+
+    conc = np.exp(log_alpha)
+    beta = A.T
+    psi = normalize(conc * softmax(x @ A))
+    if np.isnan(p_value): p_value = 1.0
+
+    df_intron_group = pd.DataFrame(dict(intron_group=[intron_group], p_value=[p_value], ll_null=[ll_null], ll=[ll], n_classes=[n_classes]))
+    # df_intron = pd.DataFrame(dict(psi_a=psi))
+
+    return df_intron_group, psi
+
+def run_regression_2(ttype_by_intron, ttype_by_ephys, features_subset, intron_group):
+    introns_to_use = features_subset.loc[features_subset.intron_group == intron_group].index.astype(int)
+    y = ttype_by_intron[:, introns_to_use].toarray()
+    x = ttype_by_ephys
+
+    cells_to_use = np.where(y.sum(axis=1) > 0)[0]
+    y = y[cells_to_use]
+    x = x[cells_to_use]
+    n_cells, n_classes = y.shape
+    n_covariates = 2
+    x = np.column_stack([np.ones(n_cells), x])
     x_null = np.expand_dims(x[:, 0], axis=1)
 
     pseudocounts = 10.0
@@ -141,27 +176,14 @@ def run_regression(args):
     model_null = lambda: DirichletMultinomialGLM(1, n_classes, init_A=init_A_null)
 
     ll_null, model_null = fit_model(model_null, x_null, y)
-    init_A = np.zeros((2, n_classes - 1), dtype=float)
-    init_A[0] = alr(y[cell_mask_a].sum(axis=0) + pseudocounts, denominator_idx=-1)
-    init_A[1] = alr(y[cell_mask_b].sum(axis=0) + pseudocounts, denominator_idx=-1) - init_A[0]
+    init_A = np.zeros((n_covariates, n_classes - 1), dtype=float)
     model = lambda: DirichletMultinomialGLM(n_covariates, n_classes, init_A=init_A)
     ll, model = fit_model(model, x, y)
     if ll+1e-2 < ll_null:
-        raise Exception(f"WARNING: optimization failed for intron_group {intron_group}. ll_null={ll_null} ll_full={ll}")
-    p_value = lrtest(ll_null, ll, n_classes - 1)
+        return pd.DataFrame(dict(intron_group=[intron_group], p_value=[None], ll_null=[None], ll=[None], n_classes=[n_classes])), pd.DataFrame()
     A = model.get_full_A().cpu().detach().numpy()
-    log_alpha = model.log_alpha.cpu().detach().numpy()
-
-    conc = np.exp(log_alpha)
     beta = A.T
-    psi1 = normalize(conc * softmax(beta[:, 0]))
-    psi2 = normalize(conc * softmax(beta.sum(axis=1)))
-    if np.isnan(p_value): p_value = 1.0
-
-    df_intron_group = pd.DataFrame(dict(intron_group=[intron_group], p_value=[p_value], ll_null=[ll_null], ll=[ll], n_classes=[n_classes]))
-    df_intron = pd.DataFrame(dict(psi_a=psi1, psi_b=psi2))
-
-    return df_intron_group, df_intron
+    return beta
 
 
 def _run_differential_splicing(
@@ -337,6 +359,7 @@ def run_differential_splicing(
     cell_idx_b,
     **kwargs
 ):
+    from statsmodels.stats.multitest import multipletests
     print("sample sizes: ", len(cell_idx_a), len(cell_idx_b))
 
     df_intron_group, df_intron = _run_differential_splicing(
@@ -497,6 +520,7 @@ class CVLassoDirichletMultinomialGLM:
         warnings.filterwarnings('ignore')
 
     def fit(self, X, Y, stratification, device="cpu", threads=1):
+        from joblib import Parallel, delayed
         n_covariates = X.shape[1]
         n_classes = Y.shape[1]
 
@@ -562,6 +586,7 @@ def _run_differential_expression(adata, cell_idx_a, cell_idx_b, min_total_cells_
 def run_differential_expression(
     adata, cell_idx_a, cell_idx_b, min_total_cells_per_gene=100
 ):
+    from statsmodels.stats.multitest import multipletests
     print("sample sizes: ", len(cell_idx_a), len(cell_idx_b))
     diff_exp = _run_differential_expression(
         adata, cell_idx_a, cell_idx_b, min_total_cells_per_gene
@@ -646,3 +671,11 @@ def mask_PSI(adata_spl, marker_introns, groupby, min_cells=10):
                 PSI_raw_masked[idx_cells, i] = np.nan
     adata_spl.layers["PSI_raw_masked"] = PSI_raw_masked
     return adata_spl
+
+def run_regression_list(ephys_prop, intron_group_list):
+    from functools import partial
+    adata = anndata.read_h5ad("proc/adata_filtered.h5ad")
+    run_regression_partial = partial(run_regression, adata.X, adata.obs[ephys_prop].values, adata.var)
+    df, _ = zip(*map(run_regression_partial, intron_group_list))
+    df = pd.concat(df)
+    return df

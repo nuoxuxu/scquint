@@ -342,6 +342,3 @@ def regroup(adata):
     adata = adata[:, mask]
 
     return adata
-
-def yes():
-    print("yes")
