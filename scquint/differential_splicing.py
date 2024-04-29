@@ -121,40 +121,51 @@ def normalize(x):
     return x / sum(x)
 
 
-def run_regression(ttype_by_intron, ttype_by_ephys, features_subset, intron_group, device="cpu"):
-    introns_to_use = features_subset.loc[features_subset.intron_group == intron_group].index.astype(int)
-    y = ttype_by_intron[:, introns_to_use].toarray()
-    x = ttype_by_ephys
+def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
+    y = adata[:, adata.var.intron_group == intron_group].X.toarray()
+    x = adata.obsm[predictor]
 
-    cells_to_use = np.where(y.sum(axis=1) > 0)[0]
+    cells_to_use = np.where((y.sum(axis=1) > 0) & (~np.isnan(adata.obsm[predictor])))[0]
     y = y[cells_to_use]
     x = x[cells_to_use]
+
+    df = pd.DataFrame(
+        {
+            "predictor": x,
+            "subclass": adata[cells_to_use, :].obs["subclass"].to_list(),
+        }
+    )
+
+    if subclass == True:
+        x_reduced = np.asarray(dmatrix("subclass", df))
+        x_full = np.asarray(dmatrix("predictor + subclass", df))
+    else:
+        x_reduced = np.ones((cells_to_use.shape[0], 1))
+        x_full = np.asarray(dmatrix("predictor", df))
+
     n_cells, n_classes = y.shape
-    n_covariates = 2
-    x = np.column_stack([np.ones(n_cells), x])
-    x_null = np.expand_dims(x[:, 0], axis=1)
 
     pseudocounts = 10.0
     init_A_null = np.expand_dims(alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), axis=0)
-    model_null = lambda: DirichletMultinomialGLM(1, n_classes, init_A=init_A_null)
+    model_null = lambda: DirichletMultinomialGLM(x_reduced.shape[1], n_classes, init_A=init_A_null)
+    ll_null, model_null = fit_model(model_null, x_reduced, y, device)
 
-    ll_null, model_null = fit_model(model_null, x_null, y, device)
-    init_A = np.zeros((n_covariates, n_classes - 1), dtype=float)
-    model = lambda: DirichletMultinomialGLM(n_covariates, n_classes, init_A=init_A)
-    ll, model = fit_model(model, x, y, device)
+    init_A = np.zeros((x_full.shape[1], n_classes - 1), dtype=float)
+    model = lambda: DirichletMultinomialGLM(x_full.shape[1], n_classes, init_A=init_A)
+    ll, model = fit_model(model, x_full, y, device)
     if ll+1e-2 < ll_null:
         return pd.DataFrame(dict(intron_group=[intron_group], p_value=[None], ll_null=[None], ll=[None], n_classes=[n_classes])), pd.DataFrame()
+
     p_value = lrtest(ll_null, ll, n_classes - 1)
     A = model.get_full_A().cpu().detach().numpy()
     log_alpha = model.log_alpha.cpu().detach().numpy()
 
     conc = np.exp(log_alpha)
     beta = A.T
-    psi = normalize(conc * softmax(x @ A))
+    psi = normalize(conc * softmax(x_full @ A))
     if np.isnan(p_value): p_value = 1.0
 
     df_intron_group = pd.DataFrame(dict(intron_group=[intron_group], p_value=[p_value], ll_null=[ll_null], ll=[ll], n_classes=[n_classes]))
-    # df_intron = pd.DataFrame(dict(psi_a=psi))
 
     return df_intron_group, psi
 
