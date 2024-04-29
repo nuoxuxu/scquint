@@ -39,6 +39,8 @@ def load_adata_from_starsolo(
 
 def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
     import warnings
+    if not isinstance(gtf_path, str):
+        gtf_path = str(gtf_path)
     if not gtf_path.endswith("110.gtf"):
         warnings.warn("The file path does not end with '110.gtf'", UserWarning)
     adata_out = adata.copy()
@@ -142,9 +144,9 @@ def add_gene_annotation(adata, gtf_path, filter_unique_gene=True):
     return adata_out
 
 
-def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
+def group_introns(adata, by="three", filter_unique_gene_per_group=True):
     adata_out = adata.copy()
-    if by == "three_prime":
+    if by == "three":
         adata_out.var["intron_group"] = adata_out.var.apply(
             lambda intron: intron.chromosome
             + "_"
@@ -153,7 +155,7 @@ def group_introns(adata, by="three_prime", filter_unique_gene_per_group=True):
             + intron.strand,
             axis=1,
         )
-    elif by == "five_prime":
+    elif by == "five":
         adata_out.var["intron_group"] = adata_out.var.apply(
             lambda intron: intron.chromosome
             + "_"
