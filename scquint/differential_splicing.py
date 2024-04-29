@@ -122,6 +122,7 @@ def normalize(x):
 
 
 def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
+    from patsy import dmatrix
     y = adata[:, adata.var.intron_group == intron_group].X.toarray()
     x = adata.obsm[predictor]
 
@@ -146,7 +147,7 @@ def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
     n_cells, n_classes = y.shape
 
     pseudocounts = 10.0
-    init_A_null = np.expand_dims(alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), axis=0)
+    init_A_null = np.expand_dims(np.repeat(ds.alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), x_reduced.shape[1]), axis=1)
     model_null = lambda: DirichletMultinomialGLM(x_reduced.shape[1], n_classes, init_A=init_A_null)
     ll_null, model_null = fit_model(model_null, x_reduced, y, device)
 
