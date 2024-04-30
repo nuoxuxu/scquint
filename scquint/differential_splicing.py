@@ -13,7 +13,6 @@ from sklearn.model_selection import KFold, train_test_split, StratifiedKFold
 from tqdm import tqdm
 from .data import make_intron_group_summation_cpu, filter_min_cells_per_feature, filter_min_cells_per_intron_group, regroup, filter_min_global_proportion
 
-
 # original: from skbio.stats.composition import closure
 def closure(mat):
     """
@@ -147,7 +146,7 @@ def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
     n_cells, n_classes = y.shape
 
     pseudocounts = 10.0
-    init_A_null = np.expand_dims(np.repeat(alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), x_reduced.shape[1]), axis=1)
+    init_A_null = np.tile(alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), (x_reduced.shape[1], 1))
     model_null = lambda: DirichletMultinomialGLM(x_reduced.shape[1], n_classes, init_A=init_A_null)
     ll_null, model_null = fit_model(model_null, x_reduced, y, device)
 
