@@ -115,14 +115,16 @@ def lrtest(llmin, llmax, df):
     p = chi2.sf(lr, df)
     return p
 
-
 def normalize(x):
-    return x / sum(x)
-
+    return x / x.sum(axis = 1)[: , None]
 
 def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
     from patsy import dmatrix
     y = adata[:, adata.var.intron_group == intron_group].X.toarray()
+    
+    if predictor == "cpm":
+        predictor = intron_group.split("_")[0]
+
     x = adata.obsm[predictor]
 
     cells_to_use = np.where((y.sum(axis=1) > 0) & (~np.isnan(adata.obsm[predictor])))[0]
