@@ -55,7 +55,6 @@ def closure(mat):
     mat = mat / mat.sum(axis=1, keepdims=True)
     return mat.squeeze()
 
-
 # original function: from skbio.stats.composition import alr
 def alr(mat, denominator_idx=0):
     r"""
@@ -118,32 +117,14 @@ def lrtest(llmin, llmax, df):
 def normalize(x):
     return x / x.sum(axis = 1)[: , None]
 
-def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
+def run_regression(adata, intron_group, reduced, full, device="cpu"):
     from patsy import dmatrix
     y = adata[:, adata.var.intron_group == intron_group].X.toarray()
     
-    if predictor == "cpm":
-        predictor = intron_group.split("_")[0]
+    df = adata.obsm["predictors"]
 
-    x = adata.obsm[predictor]
-
-    cells_to_use = np.where((y.sum(axis=1) > 0) & (~np.isnan(adata.obsm[predictor])))[0]
-    y = y[cells_to_use]
-    x = x[cells_to_use]
-
-    df = pd.DataFrame(
-        {
-            "predictor": x,
-            "subclass": adata[cells_to_use, :].obs["subclass"].to_list(),
-        }
-    )
-
-    if subclass == True:
-        x_reduced = np.asarray(dmatrix("subclass", df))
-        x_full = np.asarray(dmatrix("predictor + subclass", df))
-    else:
-        x_reduced = np.ones((cells_to_use.shape[0], 1))
-        x_full = np.asarray(dmatrix("predictor", df))
+    x_reduced = np.asarray(dmatrix(reduced, df))
+    x_full = np.asarray(dmatrix(full, df))
 
     n_cells, n_classes = y.shape
 
@@ -170,34 +151,6 @@ def run_regression(adata, intron_group, predictor, subclass, device="cpu"):
     df_intron_group = pd.DataFrame(dict(intron_group=[intron_group], p_value=[p_value], ll_null=[ll_null], ll=[ll], n_classes=[n_classes]))
 
     return df_intron_group, psi
-
-def run_regression_2(ttype_by_intron, ttype_by_ephys, features_subset, intron_group):
-    introns_to_use = features_subset.loc[features_subset.intron_group == intron_group].index.astype(int)
-    y = ttype_by_intron[:, introns_to_use].toarray()
-    x = ttype_by_ephys
-
-    cells_to_use = np.where(y.sum(axis=1) > 0)[0]
-    y = y[cells_to_use]
-    x = x[cells_to_use]
-    n_cells, n_classes = y.shape
-    n_covariates = 2
-    x = np.column_stack([np.ones(n_cells), x])
-    x_null = np.expand_dims(x[:, 0], axis=1)
-
-    pseudocounts = 10.0
-    init_A_null = np.expand_dims(alr(y.sum(axis=0) + pseudocounts, denominator_idx=-1), axis=0)
-    model_null = lambda: DirichletMultinomialGLM(1, n_classes, init_A=init_A_null)
-
-    ll_null, model_null = fit_model(model_null, x_null, y)
-    init_A = np.zeros((n_covariates, n_classes - 1), dtype=float)
-    model = lambda: DirichletMultinomialGLM(n_covariates, n_classes, init_A=init_A)
-    ll, model = fit_model(model, x, y)
-    if ll+1e-2 < ll_null:
-        return pd.DataFrame(dict(intron_group=[intron_group], p_value=[None], ll_null=[None], ll=[None], n_classes=[n_classes])), pd.DataFrame()
-    A = model.get_full_A().cpu().detach().numpy()
-    beta = A.T
-    return beta
-
 
 def _run_differential_splicing(
     adata,

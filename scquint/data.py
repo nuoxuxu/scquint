@@ -244,9 +244,9 @@ def group_normalize(X, groups, smooth=False):
 
 def calculate_PSI(adata, smooth=False):
     if isinstance(adata.X, np.ndarray):
-        out = group_normalize(adata.X, adata.var.intron_group.values, smooth=smooth)
+        out = group_normalize(adata.X, adata.var.intron_group.values.to_numpy(), smooth=smooth)
     else:
-        out = group_normalize(adata.X.toarray(), adata.var.intron_group.values, smooth=smooth)
+        out = group_normalize(adata.X.toarray(), adata.var.intron_group.values.to_numpy(), smooth=smooth)
     return out
 
 def filter_min_global_SJ_counts(adata, min_SJ_counts):
